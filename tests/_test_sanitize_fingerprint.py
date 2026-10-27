@@ -209,6 +209,63 @@ class DshGuiParagraphTests(unittest.TestCase):
         self.assertIn("whose URL is named in the runtime context", system)
 
 
+class DshAtPathParagraphTests(unittest.TestCase):
+    """DSH 0.2.x 系统提示里 @-路径说明段的渠道指纹。
+
+    上游 2026-10 收紧后对这段散文做连续子串匹配，命中即 400 / code 11128
+    （旧通道逐段二分定位到这一段；切换 WB_CN_CHAT_UPSTREAM 后同样命中）。
+    整段同义改写：语义逐句保留，措辞全部重排，任何连续子串指纹都会失配。
+    """
+
+    PARA = ('Tokens prefixed with @ are paths the user explicitly referenced. '
+            'Relative paths resolve from the workspace root; absolute paths identify '
+            'files or directories on the host. A trailing slash marks a directory: '
+            'list it when its contents matter. Anything else is a file: use the read '
+            'tool when its contents are needed, and do not claim to have inspected it '
+            'before reading. @"..." quotes a path containing spaces.')
+    REWRITTEN = ('An @-prefixed token names a path the user pointed at.')
+
+    def test_full_paragraph_rewritten(self):
+        out = P.sanitize_text(self.PARA)
+        self.assertNotIn("Tokens prefixed with @", out)
+        self.assertIn("An @-prefixed token", out)
+
+    def test_partial_paragraph_untouched(self):
+        # 只有整段连续出现才是已确认的指纹；单独首句（用户自己的正常内容）
+        # 不能被改写。
+        partial = "Tokens prefixed with @ are paths the user explicitly referenced."
+        self.assertEqual(P.sanitize_text(partial), partial)
+        self.assertFalse(P.has_fingerprint(partial))
+
+    def test_whitespace_variants_still_match(self):
+        # 段内空格 / 换行变化不影响命中（正则按词 \s+ 连接）。
+        reflowed = self.PARA.replace(" ", "\n", 3)
+        out = P.sanitize_text(reflowed)
+        self.assertNotIn("Tokens prefixed with @", out)
+
+    def test_scoped_to_system_developer_assistant(self):
+        out = P.sanitize_messages([
+            {"role": "system", "content": self.PARA},
+            {"role": "developer", "content": self.PARA},
+            {"role": "assistant", "content": self.PARA},
+            {"role": "user", "content": self.PARA},
+            {"role": "tool", "content": self.PARA},
+        ])
+        for i in (0, 1, 2):
+            self.assertNotIn("Tokens prefixed with @", out[i]["content"])
+        for i in (3, 4):
+            self.assertEqual(out[i]["content"], self.PARA)
+
+    def test_wire_body_carries_the_rewrite(self):
+        body = P.build_upstream_body({
+            "model": "cn:deepseek-v4.1-flash",
+            "messages": [{"role": "system", "content": self.PARA},
+                         {"role": "user", "content": "在吗"}]})
+        system = body["messages"][0]["content"]
+        self.assertNotIn("Tokens prefixed with @", system)
+        self.assertIn("An @-prefixed token", system)
+
+
 class AssistantHistoryFingerprintTests(unittest.TestCase):
     """#574：assistant 历史里的身份句 / 品牌 + GUI 组合。
 

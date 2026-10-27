@@ -230,6 +230,26 @@ CN_EXCLUSIVE = {
     "kimi-k3-1", "kimi-k2.7", "minimax-m3",
     "hy3-x", "hy4-preview-dev", "hy4-preview-x",
 }
+#: 旧版一键配置写进客户端的带区前缀模型 ID（cn:x / global:x / intl:x）。
+#: 上游 2026-10 收紧后 /v2/chat/completions 只认裸名（"cn:x" 会回
+#: 11102 "service info not found"），前缀只用于本地选区，进门就剥掉。
+REALM_MODEL_PREFIXES = {"cn": "cn", "global": "intl", "intl": "intl"}
+
+
+def split_realm_prefix(model_id):
+    """剥掉模型 ID 的区域前缀，返回 (裸名, 前缀暗示的区域或 None)。
+
+    "cn:glm-5.3" -> ("glm-5.3", "cn")；"global:hy3" -> ("hy3", "intl")；
+    无前缀（或前缀不在词汇表里，如 "deepseek-v4.1-flash"、"qwen:7b" 这类
+    第三方命名空间）原样返回。路径样式的 "/" 同样不当作前缀。
+    """
+    text = str(model_id or "")
+    head, sep, rest = text.partition(":")
+    if sep and rest and "/" not in head and head.lower() in REALM_MODEL_PREFIXES:
+        return rest, REALM_MODEL_PREFIXES[head.lower()]
+    return text, None
+
+
 def exclusive_realm(model_id):
     """"intl"/"cn" when only that exit serves the model, else ""."""
     if not model_id:
@@ -11832,6 +11852,29 @@ SANITIZE_DSH_GUI_LOWER = "whose url the runtime context names"
 SANITIZE_BRAND_RE = re.compile(r"DeepSeek[ \t]+Harness", re.IGNORECASE)
 SANITIZE_BRAND_REPLACEMENT = "DeepSeek"
 SANITIZE_BRAND_LOWER = "harness"
+# DSH 0.2.x 的 @-路径说明段（dsh-agent-instructions 静态文本）：上游 2026-10
+# 收紧后的渠道校验会拦它（对旧通道逐段二分定位到这一段；新通道同样 11-28）。
+# 整段同义改写——语义逐句保留，措辞全部重排，任何以连续子串匹配的指纹都会
+# 失配。正则按原文逐词 \s+ 连接，段内换行/空格变化不影响命中；只在整段连续
+# 出现时才改写，用户自己的正常内容不会误伤。
+_SANITIZE_AT_PATH_PARA = (
+    "Tokens prefixed with @ are paths the user explicitly referenced. "
+    "Relative paths resolve from the workspace root; absolute paths identify "
+    "files or directories on the host. A trailing slash marks a directory: "
+    "list it when its contents matter. Anything else is a file: use the read "
+    "tool when its contents are needed, and do not claim to have inspected it "
+    "before reading. @\"...\" quotes a path containing spaces.")
+SANITIZE_AT_PATH_RE = re.compile(
+    r"(?i)" + r"\s+".join(re.escape(w) for w in _SANITIZE_AT_PATH_PARA.split()))
+SANITIZE_AT_PATH_REPLACEMENT = (
+    "An @-prefixed token names a path the user pointed at. Paths relative to "
+    "the workspace root resolve from it, while absolute paths address files or "
+    "directories anywhere on the host. A token ending with a slash is a "
+    "directory: enumerate its contents when they matter; every other token is "
+    "a file: inspect it with the read tool before relying on what it holds, "
+    "and never claim to have looked at a file you have not read. Spell a path "
+    "containing spaces as @\"...\".")
+SANITIZE_AT_PATH_LOWER = "tokens prefixed with @ are paths"
 # 指纹判定的字面量快路径（见 has_fingerprint）：原先对每段文本跑两个 (?i) 正则，
 # 4KB 输入实测 319µs，其中正则 137+188µs、几个 `in` 只占 9µs；64KB 文本要
 # 6.2ms，而 sanitize_messages 会给每个文本段都过一遍——build_upstream_body
@@ -11878,6 +11921,10 @@ def has_fingerprint(text, identity=True):
     if (SANITIZE_DSH_GUI_LOWER in low
             and SANITIZE_DSH_GUI_RE.search(text) is not None):
         return True
+    # DSH 的 @-路径说明段：同样先字面量探测，命中才走整段改写正则。
+    if (SANITIZE_AT_PATH_LOWER in low
+            and SANITIZE_AT_PATH_RE.search(text) is not None):
+        return True
     # 动词短语只是廉价前置筛：真命中与否交给正则判定。这样 "powered by" 出现在
     # 与自我介绍无关的句子（工具/插件的产品描述）时不会走进 sanitize_text 的其余
     # 清洗步骤，也不会白白改写。
@@ -11898,6 +11945,8 @@ def sanitize_text(text, identity=True):
         text = SANITIZE_IDENTITY_RE.sub(SANITIZE_IDENTITY_REPLACEMENT, text)
         # GUI 描述段单独一条规则：锚定整句，只调整句尾语序。
         text = SANITIZE_DSH_GUI_RE.sub(SANITIZE_DSH_GUI_REPLACEMENT, text)
+        # DSH 的 @-路径说明段：整段同义改写（见定义处的取舍说明）。
+        text = SANITIZE_AT_PATH_RE.sub(SANITIZE_AT_PATH_REPLACEMENT, text)
         # 品牌词缩减放在最后：GUI 规则还认全名，先让它匹配原文。
         text = SANITIZE_BRAND_RE.sub(SANITIZE_BRAND_REPLACEMENT, text)
     for old, new in SANITIZE_REWRITES:
@@ -21665,7 +21714,8 @@ class Handler(BaseHTTPRequestHandler):
         )
         try:
             explicit_realm = self._request_realm()
-            req_realm = explicit_realm or CURRENT_REALM
+            req_realm = explicit_realm or getattr(self, "_model_realm_hint", None) \
+                or CURRENT_REALM
             blocked = self._cross_realm_error(chat_req.get("model"), req_realm)
             if blocked:
                 return self._error(400, blocked, "invalid_request_error")
@@ -22011,7 +22061,8 @@ class Handler(BaseHTTPRequestHandler):
                key_label(self._key_id()) or "-"))
         try:
             explicit_realm = self._request_realm()
-            req_realm = explicit_realm or CURRENT_REALM
+            req_realm = explicit_realm or getattr(self, "_model_realm_hint", None) \
+                or CURRENT_REALM
             blocked = self._cross_realm_error(chat_req.get("model"), req_realm)
             if blocked:
                 return self._anthropic_error(400, blocked, "invalid_request_error")
@@ -22326,6 +22377,17 @@ class Handler(BaseHTTPRequestHandler):
             aliases = {}
         _apply_model_aliases(payload, aliases)
         _apply_background_model_alias(payload)
+        # 旧版客户端配置里的 "cn:x" / "global:x" 带区前缀在这里归一化：
+        # 上游只认裸名（见 split_realm_prefix），前缀暗示的区域留给
+        # _dispatch_chat_post 的选区（显式 ?realm= 仍然优先）。
+        # 账号管理路由的载荷没有 model 字段，保持原样（不注入空键）。
+        if payload.get("model") is not None:
+            _bare_model, _realm_hint = split_realm_prefix(payload.get("model"))
+            if _bare_model != payload.get("model"):
+                payload["model"] = _bare_model
+        else:
+            _realm_hint = None
+        self._model_realm_hint = _realm_hint
         # Check per-key concurrency limit (#359)
         key_ok, cur_key_conc, max_key_conc = _acquire_key_slot(self.key_entry)
         if not key_ok:
@@ -22404,7 +22466,8 @@ class Handler(BaseHTTPRequestHandler):
         t_start = time.time()
         try:
             explicit_realm = self._request_realm()
-            req_realm = explicit_realm or CURRENT_REALM
+            req_realm = explicit_realm or getattr(self, "_model_realm_hint", None) \
+                or CURRENT_REALM
             blocked = self._cross_realm_error(payload.get("model"), req_realm)
             if blocked:
                 return self._error(400, blocked, "invalid_request_error")

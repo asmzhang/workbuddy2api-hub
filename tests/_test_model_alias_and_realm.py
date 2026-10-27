@@ -115,5 +115,27 @@ check("explicit gpt-5.6-terra is not background-rewritten",
       body["model"] == "gpt-5.6-terra", body)
 
 print()
+print("[6] legacy realm-prefixed model ids split at the entry (2026-10 upstream)")
+
+# 上游收紧后 /v2/chat/completions 只认裸名："cn:x" 会回 11102 service info
+# not found。前缀只用于本地选区，进门就剥掉；不在词汇表里的冒号命名空间
+# （qwen:7b 这类第三方模型名）与空值必须原样保留。
+cases = [
+    ("cn:deepseek-v4.1-flash", ("deepseek-v4.1-flash", "cn")),
+    ("CN:hy3", ("hy3", "cn")),
+    ("global:deepseek-v4.1-flash", ("deepseek-v4.1-flash", "intl")),
+    ("intl:hy4-preview", ("hy4-preview", "intl")),
+    ("deepseek-v4.1-flash", ("deepseek-v4.1-flash", None)),
+    ("qwen:7b", ("qwen:7b", None)),
+    ("a/b:caret", ("a/b:caret", None)),
+    ("", ("", None)),
+]
+for raw, want in cases:
+    got = P.split_realm_prefix(raw)
+    check("split_realm_prefix(%r) == %r" % (raw, want), got == want, got)
+check("split_realm_prefix(None) is safe", P.split_realm_prefix(None) == ("", None),
+      P.split_realm_prefix(None))
+
+print()
 print("PASS=%d FAIL=%d" % (PASS, FAIL))
 sys.exit(1 if FAIL else 0)

@@ -4,6 +4,13 @@ rem ===========================================================
 rem  WorkBuddy international proxy - launcher
 rem  Usage: double-click, or  start-wb-proxy.bat [port]
 rem
+rem  CN chat upstream: the current official desktop build talks to
+rem  www.workbuddy.cn; the legacy copilot.tencent.com path answers
+rem  11102 "service info not found" for it. Pin the new endpoint
+rem  here (see README, WB_CN_CHAT_UPSTREAM / issue #465).
+rem ===========================================================
+set "WB_CN_CHAT_UPSTREAM=https://www.workbuddy.cn"
+rem
 rem  ASCII-only on purpose: .bat files are read using the
 rem  console code page, so non-ASCII text breaks the parser.
 rem

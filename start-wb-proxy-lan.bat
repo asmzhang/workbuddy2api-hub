@@ -3,6 +3,13 @@ setlocal EnableExtensions
 rem ===========================================================
 rem  WorkBuddy proxy - LAN mode
 rem
+rem  CN chat upstream: the current official desktop build talks to
+rem  www.workbuddy.cn; the legacy copilot.tencent.com path answers
+rem  11102 "service info not found" for it. Pin the new endpoint
+rem  here (see README, WB_CN_CHAT_UPSTREAM / issue #465).
+rem ===========================================================
+set "WB_CN_CHAT_UPSTREAM=https://www.workbuddy.cn"
+rem
 rem  Listens on every network interface so phones, laptops and
 rem  other PCs on the same network can use it.
 rem
