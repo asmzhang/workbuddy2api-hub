@@ -262,6 +262,11 @@ python tests/run_all.py realm      # 只跑名字里含 realm 的
 ## 七、版本更新记录 (Changelog)
 
 本版更新与完整历史版本请查阅 **[docs/CHANGELOG.md](docs/CHANGELOG.md)**。
+
+### Unreleased
+
+- **出站身份默认版本号对齐桌面端 5.11.3**：内置默认值从国际 5.9.4 / 国内 5.8.3、内置 CLI 2.165.0 / 2.161.0 统一升到 **5.11.3 / CLI 2.176.0**（两区），`X-IDE-Version` 与 `User-Agent` 随之变化，面板「设置 → 出站身份」的默认值同步显示新值，旧安装升级后若之前没配过覆盖值即自动生效。取值来自本机桌面客户端 5.11.3 的 `resources/install-manifest.json`（`appVersion`）与 `resources/app.asar.unpacked/cli/package.json`（`@genie/agent-cli` 2.176.0，即 UA 末段 `CLI/` 的真实来源）。升级前在隔离实例上对照过 5.9.4 与 5.11.3 两套默认值：两个区的对话与流式都正常、模型目录一致，所以这次只是让出站指纹和官方客户端一致，不改变任何请求能力，也不影响已存在的面板覆盖值。 / **Outbound identity defaults now match desktop 5.11.3**: the built-in defaults move from intl 5.9.4 / cn 5.8.3 and CLI 2.165.0 / 2.161.0 to **5.11.3 / CLI 2.176.0** for both realms, so `X-IDE-Version` and the `User-Agent` change with them, and Settings -> Outbound identity shows the new defaults (an upgraded install picks them up automatically unless it already overrides them). The numbers come from this machine's desktop client 5.11.3: `appVersion` in `resources/install-manifest.json` and `@genie/agent-cli` 2.176.0 in `resources/app.asar.unpacked/cli/package.json`, which is where the trailing `CLI/` in the UA really comes from. Before bumping, the 5.9.4 and 5.11.3 defaults were compared on an isolated instance: conversations and streaming answered in both realms and the model catalog was identical, so this only aligns the outbound fingerprint with the official client - no request capability changes, and existing panel overrides keep their values.
+
 ### v2.1.3
 
 - **运营活动与成长任务补全**：新增星巴克协作、记者节福利活动，接入任务读取、`viewed`、事件上报、`claim` 与 `claimed_at` 回读；技能分享改为创建真实分享渠道并确认进度后领奖；模板任务按服务端场景逐组上报四事件。手机 App 对话任务只提示、不伪造。

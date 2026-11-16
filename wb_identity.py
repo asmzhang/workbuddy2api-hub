@@ -7,10 +7,10 @@
      - X-Product: SaaS
      - X-Agent-Intent: craft、X-Agent-Purpose: conversation、X-Agent-Type: main
      - 国际版端点: www.workbuddy.ai
-       实测 5.9.4（本机桌面客户端 5.9.4 日志 + app.asar 解包，账号 uid 已脱敏）:
-         X-IDE-Version: 5.9.4
-         User-Agent: WorkBuddy/5.9.4 workbuddy-ai/5.9.4 CLI/2.165.0
-     - 国内版端点: copilot.tencent.com（无对应抓包，维持 5.5.6 与原 UA）
+       实测 5.11.3（本机桌面客户端 5.11.3 的 install-manifest.json + 内置 CLI 包版本，账号 uid 已脱敏）:
+         X-IDE-Version: 5.11.3
+         User-Agent: WorkBuddy/5.11.3 workbuddy-ai/5.11.3 CLI/2.176.0
+     - 国内版端点: copilot.tencent.com（同一构建的国内版，同样 5.11.3）
 
   2. 官方 VSCode 扩展 (vscode / vsc):
      - X-IDE-Type / X-IDE-Name: VSCode
@@ -67,24 +67,26 @@ import uuid
 
 import wb_settings
 
-# 5.9.4 实测（本机国际版桌面客户端 5.9.4 的日志/解包）: 对话请求的版本号与 UA。
-# UA 末段 CLI/2.165.0 是客户端内置 CLI 的版本（cli/package.json），不是桌面端
-# 自己的版本。客户端日志原样记录：
-#   user-agent: WorkBuddy/5.9.4 workbuddy-ai/5.9.4 CLI/2.165.0
-DESKTOP_VERSION_INTL = "5.9.4"
+# 5.11.3 实测（本机桌面客户端 5.11.3 / 构建 2026-11-13，resources/install-manifest.json
+# 的 appVersion 与 app.asar.unpacked/cli/package.json 的 @genie/agent-cli 版本）：对话
+# 请求的版本号与 UA。UA 末段是客户端内置 CLI 的版本，不是桌面端自己的版本。
+#   user-agent: WorkBuddy/5.11.3 workbuddy-ai/5.11.3 CLI/2.176.0
+# 上一版（5.9.4 / CLI 2.165.0）在 2026-11-16 的隔离实例上与 5.11.3 对照过：两个 realm
+# 都能照常出流，模型目录一致，所以版本号只是「像不像官方客户端」，不影响可用性。
+DESKTOP_VERSION_INTL = "5.11.3"
 # 对话请求由客户端内置 CLI 子进程发出，该进程带 CLIENT_INFO_IDE_TYPE=WorkBuddy
 # （sidecar-manager.js 硬编码），buildUserAgent 里 platform 段取它、application
 # 段取 product.json 的 applicationName（国际版为 workbuddy-ai），所以首段是大写
 # WorkBuddy、次段是小写 workbuddy-ai。
 # 注意 Electron 主进程自己发的旁路请求（msg-center / conversations）UA 是
 # workbuddy-ai/... workbuddy-ai/...，两者不是同一条链路，别照抄错。
-DESKTOP_UA_INTL = "WorkBuddy/5.9.4 workbuddy-ai/5.9.4 CLI/2.165.0"
-# 国内版桌面端：2026-10-18 两区桌面端实跑（Go 版抓包记录）为 5.8.3、
-# 内置 CLI 2.161.0；第二段按国内版是 WorkBuddy（国际版是 workbuddy-ai）。
-# 本机只装了国际版 5.9.4，CN 的 5.9.4 版本号未能本地复核，沿用旧值。
-DESKTOP_VERSION_CN = "5.8.3"
-DESKTOP_UA_CN = "WorkBuddy/5.8.3 WorkBuddy/5.8.3 CLI/2.161.0"
-DESKTOP_CLI_CN = "2.161.0"
+DESKTOP_UA_INTL = "WorkBuddy/5.11.3 workbuddy-ai/5.11.3 CLI/2.176.0"
+# 国内版桌面端：同一台机器上的客户端 product.json 端点是 www.workbuddy.cn，
+# 即国内版构建，5.11.3（install-manifest.json 的 appVersion）；内置 CLI 同样是
+# 2.176.0。第二段按国内版是 WorkBuddy（国际版是 workbuddy-ai）。
+DESKTOP_VERSION_CN = "5.11.3"
+DESKTOP_UA_CN = "WorkBuddy/5.11.3 WorkBuddy/5.11.3 CLI/2.176.0"
+DESKTOP_CLI_CN = "2.176.0"
 
 #: 官方 CodeBuddy CLI 的版本号：npm 包 @tencent-ai/codebuddy-code 的 package
 #: version。product.json 没有覆盖 platformVersion / productVersion，所以
@@ -200,7 +202,7 @@ DEFAULT_WORKBUDDY_PRODUCT_VERSION = VSCODE_PRODUCT_VERSION
 _VERSION_DEFAULTS = {
     "desktop_intl": DESKTOP_VERSION_INTL,
     "desktop_cn": DESKTOP_VERSION_CN,
-    "desktop_cli": "2.165.0",
+    "desktop_cli": "2.176.0",
     "vscode_product": VSCODE_PRODUCT_VERSION,
     "vscode_ide": VSCODE_IDE_VERSION,
     "cli": DEFAULT_IDE_VERSION,
@@ -541,7 +543,7 @@ def build_identity_headers(product, realm, uid, token,
         headers.update(trace_headers(with_parent=compat))
         if compat:
             # Desktop profile reported by workbuddy2api-panel's headers.go
-            # (CN 5.8.3 / intl 5.8.4); shared SDK values remain configurable.
+            # (CN / intl 5.11.3); shared SDK values remain configurable.
             # Not a claim that Python's TLS stack matches the official client.
             sdk_headers = cli_stainless_headers()
             # Desktop request timeout is not verified; do not copy CLI's budget.
