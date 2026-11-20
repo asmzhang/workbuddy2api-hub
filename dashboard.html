@@ -2599,6 +2599,14 @@ if(!window.__NEXT_UI__ && defaultConsoleLayout) {
     '凭证失效': 'Token expired',
     '重新登录': 'Sign in again',
     '重新登录该账号': 'Sign in again for this account',
+    '熔断放行': 'Release breaker',
+    '熔断放行：结束该账号正在生效的熔断窗口，并把连续失败计数清零。只清这一条 —— 上游限流冷却、积分不足、降权、软限流 streak 和封禁都不动，它们各有各的解除入口。': 'Release breaker: end the breaker window now in force on this account and zero its consecutive-failure count. This clears that one guard only — upstream rate-limit cooldowns, insufficient credits, demotion, soft-limit streaks and account bans all stay put, each with its own release path.',
+    '有勾选时只放行勾选的账号，没有勾选时放行当前筛选结果里所有带熔断或连败计数的账号；只清熔断，不动冷却、降权、软限流和封禁': 'With a selection this releases only the selected accounts; with none, it releases every account in the current filtered result that carries a breaker or a failure streak. Breaker only — cooldowns, demotion, soft limits and bans are left alone.',
+    '熔断已放行': 'Breaker released',
+    '熔断已放行 ': 'Breaker released: ',
+    '该账号没有熔断可放行': 'This account has no breaker to release',
+    '当前范围内的账号都没有熔断': 'No account in the current scope has a breaker',
+    '没有可操作的账号': 'No accounts to act on',
     '登录凭证已失效': 'Login token expired',
     '登录已过期，请重新登录': 'Session expired, please sign in again',
     '一键刷新凭证': 'Refresh all tokens',
@@ -4133,6 +4141,14 @@ if(!window.__NEXT_UI__ && defaultConsoleLayout) {
     "刷新模型清单": "重新整理模型清單",
     "立即从上游 API 重新拉取当前视图版本的模型清单（不走缓存；同一版本 30 秒内只能刷一次）": "立即從上游 API 重新拉取目前檢視版本的模型清單（不走快取；同一版本 30 秒內只能重新整理一次）",
     "刷新凭证": "重新整理憑證",
+    "熔断放行": "熔斷放行",
+    "熔断放行：结束该账号正在生效的熔断窗口，并把连续失败计数清零。只清这一条 —— 上游限流冷却、积分不足、降权、软限流 streak 和封禁都不动，它们各有各的解除入口。": "熔斷放行：結束該帳號正在生效的熔斷視窗，並把連續失敗計數歸零。只清這一項 —— 上游限流冷卻、積分不足、降權、軟限流 streak 與封禁都不動，它們各有各的解除入口。",
+    "有勾选时只放行勾选的账号，没有勾选时放行当前筛选结果里所有带熔断或连败计数的账号；只清熔断，不动冷却、降权、软限流和封禁": "有勾選時只放行勾選的帳號，沒有勾選時放行目前篩選結果裡所有帶熔斷或連敗計數的帳號；只清熔斷，不動冷卻、降權、軟限流與封禁",
+    "熔断已放行": "熔斷已放行",
+    "熔断已放行 ": "熔斷已放行 ",
+    "该账号没有熔断可放行": "該帳號沒有熔斷可放行",
+    "当前范围内的账号都没有熔断": "目前範圍內的帳號都沒有熔斷",
+    "没有可操作的账号": "沒有可操作的帳號",
     "刷新失败:": "重新整理失敗:",
     "刷新失败: ": "重新整理失敗: ",
     "刷新完成:": "重新整理完成:",
@@ -6331,6 +6347,7 @@ html[data-ui="next"] #nextContent .console-shell > main {padding:24px;max-width:
     </span>
     <button class="sec" onclick="setCurrentGroup(true, this)">当前分组启用</button>
     <button class="sec" onclick="setCurrentGroup(false, this)">当前分组停用</button>
+    <button class="sec" id="btnBulkBreaker" onclick="clearBreakerBulk(this)" title="有勾选时只放行勾选的账号，没有勾选时放行当前筛选结果里所有带熔断或连败计数的账号；只清熔断，不动冷却、降权、软限流和封禁">熔断放行</button>
     <!-- 分组视图只换看法；分组本身仍在每行的「分组」chip 上设置。 -->
     <button class="sec" id="btnAcctGroupView" onclick="toggleAccountGroupView(this)" aria-pressed="false"
              title="按分组把账号列表切成可折叠的小节；想改分组，点每行账号上的「分组」">按分组查看</button>
@@ -12386,6 +12403,9 @@ function accountRow(a){
     +   '<div class="acct-actions-row">'
     +     '<button class="sec mini" onclick="toggleAccount(&quot;' + uidAttr + '&quot;,' + (!a.enabled) + ', this)">' + (a.enabled ? '停用' : '启用') + '</button>'
     +     '<button class="sec mini" onclick="testAccount(&quot;' + uidAttr + '&quot;, this)">测试</button>'
+    +     (a.breakerFor || a.fails
+          ? '<button class="sec mini" onclick="clearBreaker(&quot;' + uidAttr + '&quot;, this)" title="熔断放行：结束该账号正在生效的熔断窗口，并把连续失败计数清零。只清这一条 —— 上游限流冷却、积分不足、降权、软限流 streak 和封禁都不动，它们各有各的解除入口。">熔断放行</button>'
+          : '')
     +     (isTokenBad
           ? '<button class="bad mini" onclick="openLoginModal(&quot;' + realmAttr + '&quot;)" title="凭证已失效，点击重新扫码授权并自动更新该账号">重新登录</button>'
           : '<button class="sec mini" onclick="refreshOne(&quot;' + uidAttr + '&quot;, this)">刷新凭证</button>')
@@ -13283,6 +13303,38 @@ async function toggleAccount(uid, enable, btn){
     await postJSON('/accounts/set', {uid: uid, enabled: enable});
     await loadAccounts();
     toast(enable ? '账号已成功启用' : '账号已停用', 'ok');
+  }catch(e){
+    toast('操作失败: ' + e.message, 'bad');
+  }finally{
+    if(btn) btn.disabled = false;
+  }
+}
+// 熔断放行 / 置0：只结束熔断这一条护栏，冷却、积分、降权、软限流 streak 和封禁
+// 各有各的解除入口。窗口和连续失败计数在账号侧一起清（见 wb_accounts），所以这里
+// 不需要两个按钮 —— 留着计数只等于下一次失败换一个更长的窗口。
+async function clearBreaker(uid, btn){
+  if(btn) btn.disabled = true;
+  try{
+    const r = await postJSON('/accounts/clear-breaker', {uid: uid});
+    await loadAccounts();
+    toast(r && Number(r.released) > 0 ? '熔断已放行' : '该账号没有熔断可放行', 'ok');
+  }catch(e){
+    toast('操作失败: ' + e.message, 'bad');
+  }finally{
+    if(btn) btn.disabled = false;
+  }
+}
+// 批量口径与「启用 / 停用 / 删除 / 导出」一致：有勾选只放行勾选的号，没有勾选
+// 放行当前筛选结果。整屏送进来也没关系：没有熔断的号在后端不落盘、不算进 released。
+async function clearBreakerBulk(btn){
+  const scope = acctScopeUids();
+  if(!scope.uids.length){ toast('没有可操作的账号', 'warn'); return; }
+  if(btn) btn.disabled = true;
+  try{
+    const r = await postJSON('/accounts/clear-breaker', {uids: scope.uids});
+    await loadAccounts();
+    const released = r ? Number(r.released) || 0 : 0;
+    toast(released > 0 ? '熔断已放行 ' + released + ' 个账号' : '当前范围内的账号都没有熔断', 'ok');
   }catch(e){
     toast('操作失败: ' + e.message, 'bad');
   }finally{

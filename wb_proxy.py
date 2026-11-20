@@ -26031,6 +26031,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._route_accounts_sync_profile(payload)
         if path == "/accounts/test":
             return self._route_accounts_test(payload)
+        if path == "/accounts/clear-breaker":
+            return self._route_accounts_clear_breaker(payload)
         if path == "/accounts/set":
             return self._route_accounts_set(payload)
         if path == "/accounts/product":
@@ -26855,6 +26857,53 @@ class Handler(BaseHTTPRequestHandler):
                "ok" if network.get("ok") else "DOWN"), tag="accounts")
         return self._json_panel(200, {"ok": True, "summary": summary, "network": network,
                                 "results": rows, "accounts": account_views()})
+
+    def _route_accounts_clear_breaker(self, payload):
+        """熔断放行 / 置0：结束正在生效的熔断窗口，并把连续失败计数清零。
+
+        uid = 单个账号（看板按钮走这条），uids = 批量。只清熔断：上游限流冷却、
+        积分不足、降权、软限流 streak 和封禁都不动，它们各有各的解除入口。
+        """
+        uids = payload.get("uids")
+        if uids is None:
+            if not payload.get("uid"):
+                return self._error(400, "uid or uids required")
+            uids = [payload.get("uid")]
+        elif not isinstance(uids, list) or not uids:
+            return self._error(400, "uids must be a non-empty list",
+                               "invalid_request_error")
+        # 与 /accounts/set-all 同一个口径：去掉空值、重复值（同一号送两次会让
+        # released 数出两个，面板上的「已放行 N 个」就不可信了），空的清单当
+        # 无效请求 —— 那不是一个能执行的操作，不该伪装成「没有这个账号」。
+        wanted = list(dict.fromkeys(str(uid).strip() for uid in uids if str(uid).strip()))
+        if not wanted:
+            return self._error(400, "uids must contain at least one non-empty uid",
+                               "invalid_request_error")
+        released, clean, missing = [], [], []
+        for uid in wanted:
+            account = POOL.get(uid)
+            if account is None:
+                missing.append(uid)
+                continue
+            before = account.public()
+            updated = POOL.clear_breaker(uid)
+            # 只数真带着熔断或连败计数的号：批量入口会把整屏账号一起送进来，
+            # 把「本来就没事」的也算进 released，面板上的数字就成了虚报。
+            if bool(before.get("breakerFor")) or int(before.get("fails") or 0) > 0:
+                released.append(updated)
+                log("breaker released: uid=%s fails=%d window=%s"
+                    % (str(uid)[:8], int(before.get("fails") or 0),
+                       ("%ds" % before["breakerFor"]) if before.get("breakerFor") else "none"),
+                    tag="accounts")
+            else:
+                clean.append(updated)
+        if not released and not clean:
+            return self._error(404, "no such account")
+        return self._json_panel(200, {"ok": True,
+                                      "released": len(released),
+                                      "clean": len(clean),
+                                      "missing": missing,
+                                      "accounts": account_views()})
 
     def _route_accounts_set(self, payload):
         uid = payload.get("uid")

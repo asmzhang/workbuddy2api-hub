@@ -4067,6 +4067,22 @@ class Account(object):
             self.banned_at = 0.0
             self.restricted_until = 0.0
 
+    def clear_breaker(self):
+        """熔断放行 / 置0：结束正在生效的熔断窗口，并把连续失败计数清零。
+
+        只动熔断这一条护栏——上游限流冷却、积分不足、降权、软限流 streak 和封禁
+        都原样保留，它们各有各的解除入口。计数必须和窗口一起清：只清窗口的话，
+        下一次失败会直接按 `breaker_backoff(fails + 1)` 换一个更长的窗口，
+        「放行」反而变成「加重」。返回本次是否真有东西被清掉，供调用方决定
+        要不要落盘和提示。
+        """
+        with self._throttle_lock:
+            cleared = bool(self.breaker_until) or self.fails > 0
+            self.breaker_until = 0.0
+            self.fails = 0
+            self.last_fail_at = 0.0
+        return cleared
+
     def clear_model_cooldown(self, model):
         """只解除某个模型的限流，账号级状态原样保留。
 
@@ -4738,6 +4754,19 @@ class AccountPool(object):
             return None
         account.tasks_enabled = bool(tasks_enabled)
         account.save(self.dir)
+        return account.public()
+
+    def clear_breaker(self, uid):
+        """手动放行一个账号：清掉熔断窗口与连续失败计数，回公共视图。
+
+        账号不存在返回 None（与其余 set_* 同一个口径）。本来就没有熔断的号什么都不
+        用写：批量入口会把整屏账号送进来，空写一遍只是磨磁盘。
+        """
+        account = self.get(uid)
+        if account is None:
+            return None
+        if account.clear_breaker():
+            account.save(self.dir)
         return account.public()
 
     def set_weight(self, uid, weight):
